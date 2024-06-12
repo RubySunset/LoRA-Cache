@@ -1,6 +1,6 @@
 from LoRA_Cache.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
 
-pipe = StableDiffusionPipeline.from_pretrained('runwayml/stable-diffusion-v1-5')
+pipe = StableDiffusionPipeline.from_pretrained('runwayml/stable-diffusion-v1-5').to('cuda')
 # Without DeepCache
 image = pipe(
     prompt='A girl looking up at the stars'
