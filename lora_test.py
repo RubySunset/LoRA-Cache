@@ -57,7 +57,7 @@ def main(args):
     lora = lora_info['character'][0]
     pipeline.load_lora_weights(
         lora_path,
-        weight_name=f'{lora['id']}.safetensors',
+        weight_name=lora['id']+'.safetensors',
         adapter_name=lora['id']
     )
     init_prompt, negative_prompt = get_prompt(args.image_style)

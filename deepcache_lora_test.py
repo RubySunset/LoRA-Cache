@@ -54,7 +54,7 @@ def main(args):
     pipeline.scheduler = DPMSolverMultistepScheduler.from_config(schedule_config)
 
     init_prompt, negative_prompt = get_prompt(args.image_style)
-    caching_intervals = ()
+    caching_intervals = (1, 2, 3, 4, 5)
 
     if not os.path.exists('images'):
         os.makedirs('images')
@@ -62,15 +62,16 @@ def main(args):
     # Go through each LoRA and caching interval
     for category in lora_info:
         for lora in lora_info[category]:
-            for interval in caching_intervals:
 
-                pipeline.load_lora_weights(
-                    lora_path,
-                    weight_name=f'{lora['id']}.safetensors',
-                    adapter_name=lora['id']
-                )
-                prompt = init_prompt + ', ' + ', '.join(lora['trigger'])
-                pipeline.set_adapters([lora['id']])
+            pipeline.load_lora_weights(
+                lora_path,
+                weight_name=lora['id']+'.safetensors',
+                adapter_name=lora['id']
+            )
+            prompt = init_prompt + ', ' + ', '.join(lora['trigger'])
+            pipeline.set_adapters([lora['id']])
+
+            for interval in caching_intervals:
 
                 image = pipeline(
                     prompt=prompt, 
@@ -85,7 +86,7 @@ def main(args):
                     cache_layer_id=0,
                     cache_block_id=1
                 ).images[0]
-                image.save(os.path.join('images', f'{args.image_style}_{lora['id']}_{interval}.png'), 'PNG')
+                image.save(os.path.join('images', f'{args.image_style}_{lora["id"]}_{str(interval)}.png'), 'PNG')
 
 if __name__ == "__main__":
 
