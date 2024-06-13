@@ -14,7 +14,7 @@ def calculate_clip_score(images, prompts):
     clip_score = clip_score_fn(torch.from_numpy(images_int).permute(0, 3, 1, 2), prompts).detach()
     return round(float(clip_score), 4)
 
-def load_image(name):
+def get_image(name):
     image = load_image(os.path.join('images', f'{name}.png'))
     return np.array(image, dtype=np.float32)[np.newaxis, ...] / 255.0
 
@@ -29,7 +29,7 @@ for style in ('anime', 'reality'):
         for i, lora in enumerate(lora_info[category]):
             prompt = [', '.join(lora['trigger'])]
             for j, interval in enumerate(caching_intervals):
-                image = load_image(f'{style}_{lora['id']}_{str(interval)}')
+                image = get_image(f'{style}_{lora["id"]}_{str(interval)}')
                 score = calculate_clip_score(image, prompt)
                 scoreMatrix[i, j] = score
         scores[style][category] = scoreMatrix.mean(axis=0).tolist()
