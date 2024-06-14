@@ -157,6 +157,8 @@ def main(args):
         ).images[0]
 
         filename = f'{args.image_style}_{args.method}'
+        if args.method == 'composite' and args.cache_layer_id is not None:
+            filename += f'_{args.dom_lora_weight}'
         for lora in combo:
             filename += f'_{lora["id"]}'
         image.save(os.path.join('images2', f'{filename}.png'), 'PNG')

@@ -1047,7 +1047,7 @@ class StableDiffusionPipeline(
                 # Flush cache
                 if lora_composite:
                     prv_features[i % len(adapters)] = None
-                elif i in interval_seq:
+                elif cache_layer_id is not None and i in interval_seq:
                     prv_features = None
 
                 if lora_composite:
