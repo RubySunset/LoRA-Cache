@@ -793,6 +793,8 @@ class StableDiffusionPipeline(
             Union[Callable[[int, int, Dict], None], PipelineCallback, MultiPipelineCallbacks]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        lora_composite: bool = False,
+        dom_lora_weight: float = 1.0,
         cache_interval: int = 1,
         cache_layer_id: Optional[int] = None,
         cache_block_id: Optional[int] = None,
@@ -1013,18 +1015,25 @@ class StableDiffusionPipeline(
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
 
-        prv_features = None
-        if cache_interval == 1:
-            interval_seq = list(range(num_inference_steps))
-        else:
-            if uniform:
-                interval_seq = list(range(0, num_inference_steps, cache_interval))
+        if lora_composite:
+            adapters = self.get_active_adapters()
+            prv_features = [None] * len(adapters)
+            nondom_lora_weight = 1 / (dom_lora_weight + len(adapters) - 1)
+        elif cache_layer_id is not None:
+            prv_features = None
+            if cache_interval == 1:
+                interval_seq = list(range(num_inference_steps))
             else:
-                num_slow_step = num_inference_steps // cache_interval
-                if num_inference_steps % cache_interval != 0:
-                    num_slow_step += 1
-                interval_seq, pow = sample_from_quad_center(num_inference_steps, num_slow_step, center=center, pow=pow)
-        interval_seq = sorted(interval_seq)
+                if uniform:
+                    interval_seq = list(range(0, num_inference_steps, cache_interval))
+                else:
+                    num_slow_step = num_inference_steps // cache_interval
+                    if num_inference_steps % cache_interval != 0:
+                        num_slow_step += 1
+                    interval_seq, pow = sample_from_quad_center(num_inference_steps, num_slow_step, center=center, pow=pow)
+            interval_seq = sorted(interval_seq)
+        else:
+            prv_features = None
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -1035,28 +1044,62 @@ class StableDiffusionPipeline(
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                if i in interval_seq:
+                # Flush cache
+                if lora_composite:
+                    prv_features[i % len(adapters)] = None
+                elif i in interval_seq:
                     prv_features = None
 
-                # predict the noise residual
-                noise_pred, prv_features = self.unet(
-                    latent_model_input,
-                    t,
-                    encoder_hidden_states=prompt_embeds,
-                    timestep_cond=timestep_cond,
-                    cross_attention_kwargs=self.cross_attention_kwargs,
-                    added_cond_kwargs=added_cond_kwargs,
-                    quick_replicate=cache_interval > 1,
-                    replicate_prv_feature=prv_features,
-                    cache_layer_id=cache_layer_id,
-                    cache_block_id=cache_block_id,
-                    return_dict=False,
-                )
+                if lora_composite:
+                    noise_preds = []
+                    self.enable_lora()
+                    for j, adapter in enumerate(adapters):
+                        self.set_adapters(adapter)
+                        noise_pred, prv_features[j] = self.unet(
+                            latent_model_input,
+                            t,
+                            encoder_hidden_states=prompt_embeds,
+                            timestep_cond=timestep_cond,
+                            cross_attention_kwargs=self.cross_attention_kwargs,
+                            added_cond_kwargs=added_cond_kwargs,
+                            quick_replicate=cache_layer_id is not None,
+                            replicate_prv_feature=prv_features[j],
+                            cache_layer_id=cache_layer_id,
+                            cache_block_id=cache_block_id,
+                            return_dict=False,
+                        )
+                        # Weight noise predictions depending on whether this LORA is currently the dominant one
+                        if i % len(adapters) == j:
+                            noise_preds.append(noise_pred * dom_lora_weight)
+                        else:
+                            noise_preds.append(noise_pred * nondom_lora_weight)
+                else:
+                    noise_pred, prv_features = self.unet(
+                        latent_model_input,
+                        t,
+                        encoder_hidden_states=prompt_embeds,
+                        timestep_cond=timestep_cond,
+                        cross_attention_kwargs=self.cross_attention_kwargs,
+                        added_cond_kwargs=added_cond_kwargs,
+                        quick_replicate=cache_layer_id is not None,
+                        replicate_prv_feature=prv_features,
+                        cache_layer_id=cache_layer_id,
+                        cache_block_id=cache_block_id,
+                        return_dict=False,
+                    )
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    if lora_composite:
+                        noise_preds = torch.stack(noise_preds, dim=0)
+                        noise_pred_uncond, noise_pred_text = noise_preds.chunk(2, dim=1)
+                        # Do sum instead of mean since we have already weighted the noise predictions (weights sum to 1)
+                        noise_pred_uncond = noise_pred_uncond.sum(dim=0)
+                        noise_pred_text = noise_pred_text.sum(dim=0)
+                        noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    else:
+                        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                        noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
