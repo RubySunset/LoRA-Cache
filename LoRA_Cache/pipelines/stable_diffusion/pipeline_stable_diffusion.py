@@ -794,7 +794,7 @@ class StableDiffusionPipeline(
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         lora_composite: bool = False,
-        dom_lora_weight: float = 1.0,
+        dom_lora_coeff: float = 1.0,
         cache_interval: int = 1,
         cache_layer_id: Optional[int] = None,
         cache_block_id: Optional[int] = None,
@@ -1018,7 +1018,8 @@ class StableDiffusionPipeline(
         if lora_composite:
             adapters = self.get_active_adapters()
             prv_features = [None] * len(adapters)
-            nondom_lora_weight = 1 / (dom_lora_weight + len(adapters) - 1)
+            nondom_lora_weight = len(adapters) / (dom_lora_coeff + len(adapters) - 1)
+            dom_lora_weight = nondom_lora_weight * dom_lora_coeff
         elif cache_layer_id is not None:
             prv_features = None
             if cache_interval == 1:
@@ -1093,9 +1094,8 @@ class StableDiffusionPipeline(
                     if lora_composite:
                         noise_preds = torch.stack(noise_preds, dim=0)
                         noise_pred_uncond, noise_pred_text = noise_preds.chunk(2, dim=1)
-                        # Do sum instead of mean since we have already weighted the noise predictions (weights sum to 1)
-                        noise_pred_uncond = noise_pred_uncond.sum(dim=0)
-                        noise_pred_text = noise_pred_text.sum(dim=0)
+                        noise_pred_uncond = noise_pred_uncond.mean(dim=0)
+                        noise_pred_text = noise_pred_text.mean(dim=0)
                         noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
                     else:
                         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
