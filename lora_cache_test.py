@@ -111,7 +111,7 @@ def main(args):
     # Load all lora weights
     for category in lora_info:
         for lora in lora_info[category]:
-            pipeline.lora_lora_weights(
+            pipeline.load_lora_weights(
                 lora_path,
                 weight_name=lora['id']+'.safetensors',
                 adapter_name=lora['id']
@@ -150,7 +150,7 @@ def main(args):
             cross_attention_kwargs={"scale": args.lora_scale},
             callback_on_step_end=switch_callback,
             lora_composite=True if args.method == "composite" else False,
-            dom_lora_weight=args.dom_lora_weight,
+            dom_lora_coeff=args.dom_lora_weight,
             cache_interval=args.cache_interval,
             cache_layer_id=args.cache_layer_id,
             cache_block_id=args.cache_block_id
